@@ -1,69 +1,78 @@
-version: "3.8"
-
+version: "3"
 services:
-  # MySQL Database
-  mysql:
-    image: mysql:8.0
-    container_name: sample-gin-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: password
-      MYSQL_DATABASE: testdb
-      MYSQL_USER: appuser
-      MYSQL_PASSWORD: password
+  go_net_http:
+    build:
+      context: .
+    container_name: cube_go_gin_http
     ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    networks:
-      - app-network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      timeout: 20s
-      retries: 10
-
-  # Go Application
-  app:
-    build: .
-    container_name: sample-gin-app
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    environment:
-      - PORT=8080
-      - DATABASE_URL=root:password@tcp(mysql:3306)/testdb?charset=utf8mb4&parseTime=True&loc=Local
-      - OTEL_SERVICE_NAME=health-check-service
-      - OTEL_EXPORTER_OTLP_COMPRESSION=gzip
-
-      # print traces on console
-      # - OTEL_LOG_LEVEL=debug
-      # send traces to CubeAPM
-      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://host.docker.internal:4318/v1/traces
+      - "8000:8000"
     depends_on:
-      mysql:
-        condition: service_healthy
-    networks:
-      - app-network
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://localhost:8080/health",
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      - redis
+      - mongo
+      - kafka
+      - clickhouse
+    restart: always
 
-volumes:
-  mysql_data:
-    driver: local
+  redis:
+    image: redis:alpine3.18
+    container_name: cube_go_gin_http_redis
 
-networks:
-  app-network:
-    driver: bridge
+  mongo:
+    image: mongo:7.0.12
+    container_name: cube_go_gin_http_mongo
+
+  clickhouse:
+    image: "clickhouse/clickhouse-server:24.8.11.5-alpine"
+    user: "101:101"
+    container_name: cube_go_gin_http_clickhouse
+    volumes:
+      - ./clickhouse/config.xml:/etc/clickhouse-server/config.d/config.xml
+      - ./clickhouse/users.xml:/etc/clickhouse-server/users.d/users.xml
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    depends_on:
+      - clickhouse-keeper
+
+  clickhouse-keeper:
+    image: "clickhouse/clickhouse-keeper:24.8.11.5-alpine"
+    user: "101:101"
+    container_name: cube_go_gin_http_clickhouse_keeper
+    volumes:
+      - ./clickhouse/keeper_config.xml:/etc/clickhouse-keeper/keeper_config.xml
+    ports:
+      - "9181:9181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: cube_go_gin_http_kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    # healthcheck:
+    #   test: "netstat -ltn | grep -c ':9092'"
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop:4.0.0
+    container_name: cube_go_gin_http_kafdrop
+    depends_on:
+      - kafka
+    ports:
+      - 19000:9000
+    environment:
+      KAFKA_BROKERCONNECT: kafka:29092

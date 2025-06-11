@@ -2,236 +2,194 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"time"
 
+	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/gin-gonic/gin"
-	"github.com/uptrace/opentelemetry-go-extra/otelgorm"
-	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	"github.com/redis/go-redis/v9"
+	"github.com/segmentio/kafka-go"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
-// User model for demonstration
-type User struct {
-	ID        uint      `json:"id" gorm:"primarykey"`
-	Name      string    `json:"name" gorm:"type:varchar(255)"`
-	Email     string    `json:"email" gorm:"type:varchar(255);uniqueIndex"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
+const kafkaTopicName = "sample_topic"
 
-// Database instance
-var db *gorm.DB
-// var tracer apiTrace.Tracer
+var (
+	hcl http.Client
+	rdb *redis.Client
+	mdb *mongo.Client
+	ccn driver.Conn
+	kcn *kafka.Conn
+)
 
-// HTTP client instance (reusable)
-var httpClient *http.Client
-
-// HealthResponse represents the health check response
-type HealthResponse struct {
-	Status    string `json:"status"`
-	Timestamp string `json:"timestamp"`
-	Database  string `json:"database"`
-	UserCount *int64 `json:"user_count,omitempty"`
-}
-
-// InternalCheckResponse represents the response from internal health check
-type InternalCheckResponse struct {
-	Status           string          `json:"status"`
-	Timestamp        string          `json:"timestamp"`
-	InternalHealth   *HealthResponse `json:"internal_health,omitempty"`
-	InternalError    string          `json:"internal_error,omitempty"`
-}
-
-func initDatabase() {
-	// Database connection parameters - you can modify these or use environment variables
-	dsn := "root:password@tcp(localhost:3306)/testdb?charset=utf8mb4&parseTime=True&loc=Local"
-	
-	// You can also use environment variables
-	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
-		dsn = dbURL
+func main() {
+	if err := run(); err != nil {
+		log.Fatalln(err)
 	}
+}
 
+func run() error {
 	var err error
-	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+
+	// initialize http client
+	hcl = http.Client{}
+
+	// initialize redis
+	rdb = redis.NewClient(&redis.Options{
+		Addr: "redis:6379",
 	})
 
+	// initialize mongo
+	mdbOpts := options.Client().ApplyURI("mongodb://mongo:27017")
+	mdb, err = mongo.Connect(context.Background(), mdbOpts)
 	if err != nil {
-		log.Printf("Failed to connect to database: %v", err)
-		// For demo purposes, we'll continue without database connection
-		return
+		return err
 	}
-
-	// Attach OpenTelemetry plugin
-	if err := db.Use(otelgorm.NewPlugin()); err != nil {
-		log.Printf("Failed to attach OpenTelemetry plugin: %v", err)
-		return
+	if err = mdb.Ping(context.Background(), readpref.Primary()); err != nil {
+		return err
 	}
+	defer func() {
+		_ = mdb.Disconnect(context.Background())
+	}()
 
-	// Auto migrate the schema
-	err = db.AutoMigrate(&User{})
+	// initialize clickhouse
+	ccn, err = clickhouse.Open(&clickhouse.Options{
+		Addr: []string{"clickhouse:9000"},
+	})
 	if err != nil {
-		log.Printf("Failed to migrate database: %v", err)
+		return err
+	}
+	if err = ccn.Ping(context.Background()); err != nil {
+		return err
 	}
 
-	log.Println("Database connected successfully")
+	// initialize kafka
+	kcn, err = kafka.DialLeader(context.Background(), "tcp", "kafka:9092", kafkaTopicName, 0)
+	if err != nil {
+		return err
+	}
+
+	// Create Gin router
+	router := gin.Default()
+
+	// Define routes
+	router.GET("/", indexFunc)
+	router.GET("/param/:param", paramFunc)
+	router.GET("/exception", exceptionFunc)
+	router.GET("/api", apiFunc)
+	router.GET("/redis", redisFunc)
+	router.GET("/mongo", mongoFunc)
+	router.GET("/clickhouse", clickhouseFunc)
+	router.GET("/kafka/produce", kafkaProduceFunc)
+	router.GET("/kafka/consume", kafkaConsumeFunc)
+
+	// Graceful shutdown
+	srv := &http.Server{
+		Addr:    ":8000",
+		Handler: router,
+	}
+
+	// Handle SIGINT (CTRL+C)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	srvErr := make(chan error, 1)
+	go func() {
+		log.Println("Server started on :8000")
+		srvErr <- srv.ListenAndServe()
+	}()
+
+	select {
+	case err = <-srvErr:
+		return err
+	case <-ctx.Done():
+		stop()
+		log.Println("Shutting down server...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	}
 }
 
-func initHTTPClient() {
-	// Initialize HTTP client with OpenTelemetry instrumentation
-	httpClient = &http.Client{
-		Timeout:   10 * time.Second,
-		Transport: otelhttp.NewTransport(http.DefaultTransport),
-	}
+// Handlers
+
+func indexFunc(c *gin.Context) {
+	c.String(http.StatusOK, "index called")
 }
 
-func healthHandler(c *gin.Context) {
-	response := HealthResponse{
-		Status:    "healthy",
-		Timestamp: time.Now().Format(time.RFC3339),
-		Database:  "disconnected",
-	}
-
-	// Check database connection by performing a find operation
-	if db != nil {
-		var count int64
-		// Pass the request context to propagate tracing
-		if err := db.WithContext(c.Request.Context()).Model(&User{}).Count(&count).Error; err == nil {
-			response.Database = "connected"
-			response.UserCount = &count
-		} else {
-			log.Printf("Database health check failed: %v", err)
-		}
-	}
-
-	c.JSON(http.StatusOK, response)
+func paramFunc(c *gin.Context) {
+	param := c.Param("param")
+	c.String(http.StatusOK, "Got param: %s", param)
 }
 
-func internalHealthCheckHandler(c *gin.Context) {
-	response := InternalCheckResponse{
-		Status:    "healthy",
-		Timestamp: time.Now().Format(time.RFC3339),
-	}
+func exceptionFunc(c *gin.Context) {
+	c.Status(http.StatusInternalServerError)
+}
 
-	// Get the current server's address (assuming it's running on the same port)
-	baseURL := "http://localhost:8080"
-	if port := os.Getenv("PORT"); port != "" {
-		baseURL = "http://localhost:" + port
-	}
-
-	req, err := http.NewRequestWithContext(c.Request.Context(), "GET", baseURL+"/health", nil)
+func apiFunc(c *gin.Context) {
+	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, "http://localhost:8000/", nil)
+	resp, err := hcl.Do(req)
 	if err != nil {
-		response.InternalError = fmt.Sprintf("Failed to create request: %v", err)
-		c.JSON(http.StatusInternalServerError, response)
-		return
-	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		response.InternalError = fmt.Sprintf("Failed to make internal request: %v", err)
-		c.JSON(http.StatusInternalServerError, response)
+		c.String(http.StatusInternalServerError, "API call error: %v", err)
 		return
 	}
 	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		response.InternalError = fmt.Sprintf("Failed to read response body: %v", err)
-		c.JSON(http.StatusInternalServerError, response)
+		c.String(http.StatusInternalServerError, "Read error: %v", err)
 		return
 	}
+	c.String(http.StatusOK, "Got api: %s", respBody)
+}
 
-	var healthResp HealthResponse
-	if err := json.Unmarshal(body, &healthResp); err != nil {
-		response.InternalError = fmt.Sprintf("Failed to parse response: %v", err)
-		c.JSON(http.StatusInternalServerError, response)
+func redisFunc(c *gin.Context) {
+	val, err := rdb.Get(c.Request.Context(), "key").Result()
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Redis error: %v", err)
 		return
 	}
-
-	response.InternalHealth = &healthResp
-	c.JSON(http.StatusOK, response)
+	c.String(http.StatusOK, "Redis called: %s", val)
 }
 
-func setupRoutes() *gin.Engine {
-	// Set Gin to release mode for production
-	gin.SetMode(gin.ReleaseMode)
-	
-	r := gin.Default()
-
-	// Add OpenTelemetry middleware
-	r.Use(otelgin.Middleware(os.Getenv("OTEL_SERVICE_NAME")))
-
-	// Add CORS middleware for better API accessibility
-	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-		
-		c.Next()
-	})
-
-
-
-	// Required endpoints
-	r.GET("/health", healthHandler)
-	r.GET("/internal-check", internalHealthCheckHandler)
-
-	return r
+func mongoFunc(c *gin.Context) {
+	collection := mdb.Database("sample_db").Collection("sampleCollection")
+	_ = collection.FindOne(c.Request.Context(), bson.D{{Key: "name", Value: "dummy"}})
+	c.String(http.StatusOK, "Mongo called")
 }
 
-func main() {
-	// Initialize OpenTelemetry
-	ctx := context.Background()
-	otelShutdown, err := setupOTelSDK(ctx)
+func clickhouseFunc(c *gin.Context) {
+	res, err := ccn.Query(c.Request.Context(), "SELECT NOW()")
 	if err != nil {
-		log.Fatalf("Failed to setup OpenTelemetry: %v", err)
+		c.String(http.StatusInternalServerError, "Clickhouse query error: %v", err)
+		return
 	}
-	defer func() {
-		if err := otelShutdown(ctx); err != nil {
-			log.Printf("Error shutting down OpenTelemetry: %v", err)
-		}
-	}()
+	c.String(http.StatusOK, "Clickhouse called: %v", res.Columns())
+}
 
-	// initialize tracer
-	// tracer = otel.Tracer(os.Getenv("OTEL_SERVICE_NAME"))
-
-
-
-	// Initialize HTTP client
-	initHTTPClient()
-
-	// Initialize database
-	initDatabase()
-
-	// Setup routes
-	r := setupRoutes()
-
-	// Get port from environment or use default
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
+func kafkaProduceFunc(c *gin.Context) {
+	kcn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	_, err := kcn.WriteMessages(
+		kafka.Message{Value: []byte("one!")},
+		kafka.Message{Value: []byte("two!")},
+		kafka.Message{Value: []byte("three!")},
+	)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Kafka produce error: %v", err)
+		return
 	}
+	c.String(http.StatusOK, "Kafka produced")
+}
 
-	log.Printf("Server starting on port %s", port)
-	log.Printf("Health endpoint: http://localhost:%s/health", port)
-	log.Printf("Internal check endpoint: http://localhost:%s/internal-check", port)
-	
-	// Start server
-	if err := r.Run(":" + port); err != nil {
-		log.Fatal("Failed to start server:", err)
-	}
-} 
+func kafkaConsumeFunc(c *gin.Context) {
+	kcn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = kcn.ReadBatch(10e3, 1e6) // fetch 10KB min, 1MB max
+	c.String(http.StatusOK, "Kafka consumed")
+}
