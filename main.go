@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -12,22 +13,29 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	"go.opentelemetry.io/contrib/instrumentation/go.mongodb.org/mongo-driver/mongo/otelmongo"
+	"go.opentelemetry.io/otel"
+	semconv "go.opentelemetry.io/otel/semconv/v1.25.0"
+	apiTrace "go.opentelemetry.io/otel/trace"
 )
 
 const kafkaTopicName = "sample_topic"
 
 var (
-	hcl http.Client
-	rdb *redis.Client
-	mdb *mongo.Client
-	ccn driver.Conn
-	kcn *kafka.Conn
+	tracer apiTrace.Tracer
+	hcl    http.Client
+	rdb    *redis.Client
+	mdb    *mongo.Client
+	ccn    driver.Conn
+	kcn    *kafka.Conn
 )
 
 func main() {
@@ -46,9 +54,15 @@ func run() error {
 	rdb = redis.NewClient(&redis.Options{
 		Addr: "redis:6379",
 	})
+	// Enable tracing instrumentation
+	if err := redisotel.InstrumentTracing(rdb); err != nil {
+		return err
+	}
 
 	// initialize mongo
 	mdbOpts := options.Client().ApplyURI("mongodb://mongo:27017")
+	// Enable tracing instrumentation
+	mdbOpts.Monitor = otelmongo.NewMonitor()
 	mdb, err = mongo.Connect(context.Background(), mdbOpts)
 	if err != nil {
 		return err
@@ -77,8 +91,28 @@ func run() error {
 		return err
 	}
 
+	// Handle SIGINT (CTRL+C)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	// Set up OpenTelemetry.
+	otelShutdown, err := setupOTelSDK(ctx)
+	if err != nil {
+		return err
+	}
+	// Handle shutdown properly so nothing leaks.
+	defer func() {
+		err = errors.Join(err, otelShutdown(context.Background()))
+	}()
+
+	// initialize tracer
+	tracer = otel.Tracer("")
+
 	// Create Gin router
 	router := gin.Default()
+
+	// Add OpenTelemetry middleware
+	router.Use(otelgin.Middleware(os.Getenv("OTEL_SERVICE_NAME")))
 
 	// Define routes
 	router.GET("/", indexFunc)
@@ -96,10 +130,6 @@ func run() error {
 		Addr:    ":8000",
 		Handler: router,
 	}
-
-	// Handle SIGINT (CTRL+C)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
 
 	srvErr := make(chan error, 1)
 	go func() {
@@ -166,6 +196,15 @@ func mongoFunc(c *gin.Context) {
 }
 
 func clickhouseFunc(c *gin.Context) {
+	_, span := tracer.Start(c.Request.Context(), "SELECT <dbname>.<tablename>", apiTrace.WithSpanKind(apiTrace.SpanKindClient))
+	span.SetAttributes(
+		semconv.DBSystemClickhouse,
+		// semconv.DBName(""),
+		semconv.DBOperation("SELECT"),
+		// semconv.DBSQLTable(""),
+		// semconv.DBStatement(""),
+	)
+	defer span.End()
 	res, err := ccn.Query(c.Request.Context(), "SELECT NOW()")
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Clickhouse query error: %v", err)
@@ -175,6 +214,17 @@ func clickhouseFunc(c *gin.Context) {
 }
 
 func kafkaProduceFunc(c *gin.Context) {
+	_, span := tracer.Start(c.Request.Context(), "publish "+kafkaTopicName, apiTrace.WithSpanKind(apiTrace.SpanKindProducer))
+	span.SetAttributes(
+		semconv.MessagingSystemKafka,
+		semconv.MessagingOperationPublish,
+		semconv.MessagingDestinationName(kafkaTopicName),
+		// semconv.ServerAddress(""),
+		// semconv.MessagingKafkaMessageKey(""),
+		// semconv.MessagingMessageBodySize(14),
+		// semconv.MessagingBatchMessageCount(3),
+		// attribute.String("key", "value"), // "go.opentelemetry.io/otel/attribute"
+	)
 	kcn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	_, err := kcn.WriteMessages(
 		kafka.Message{Value: []byte("one!")},
@@ -189,7 +239,16 @@ func kafkaProduceFunc(c *gin.Context) {
 }
 
 func kafkaConsumeFunc(c *gin.Context) {
+	_, span := tracer.Start(c.Request.Context(), "process "+kafkaTopicName, apiTrace.WithSpanKind(apiTrace.SpanKindConsumer))
+	span.SetAttributes(
+		semconv.MessagingSystemKafka,
+		semconv.MessagingOperationDeliver,
+		semconv.MessagingDestinationName(kafkaTopicName),
+	)
+	defer span.End()
+
 	kcn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	_ = kcn.ReadBatch(10e3, 1e6) // fetch 10KB min, 1MB max
+
 	c.String(http.StatusOK, "Kafka consumed")
 }
