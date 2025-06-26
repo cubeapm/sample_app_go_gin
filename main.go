@@ -12,6 +12,8 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/gin-gonic/gin"
+	"github.com/newrelic/go-agent/v3/integrations/nrgin"
+	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
 	"go.mongodb.org/mongo-driver/bson"
@@ -77,8 +79,14 @@ func run() error {
 		return err
 	}
 
+	// initialize newrelic
+	app, err := newrelic.NewApplication(
+		newrelic.ConfigFromEnvironment(),
+	)
+
 	// Create Gin router
 	router := gin.Default()
+	router.Use(nrgin.Middleware(app))
 
 	// Define routes
 	router.GET("/", indexFunc)
@@ -120,6 +128,8 @@ func run() error {
 }
 
 // Handlers
+
+// todo: All api's call is visible on APM, and the rest of the data and traces — like Redis, MongoDB, external API calls, ClickHouse, and Kafka — is not visible."
 
 func indexFunc(c *gin.Context) {
 	c.String(http.StatusOK, "index called")
