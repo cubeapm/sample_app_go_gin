@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -14,6 +15,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
+	"go.elastic.co/apm/module/apmgin/v2"
+	"go.elastic.co/apm/module/apmhttp/v2"
+	"go.elastic.co/apm/module/apmmongo/v2"
+	"go.elastic.co/apm/v2"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -23,7 +28,7 @@ import (
 const kafkaTopicName = "sample_topic"
 
 var (
-	hcl http.Client
+	hcl = *apmhttp.WrapClient(http.DefaultClient)
 	rdb *redis.Client
 	mdb *mongo.Client
 	ccn driver.Conn
@@ -40,7 +45,7 @@ func run() error {
 	var err error
 
 	// initialize http client
-	hcl = http.Client{}
+	hcl = *apmhttp.WrapClient(&http.Client{})
 
 	// initialize redis
 	rdb = redis.NewClient(&redis.Options{
@@ -49,6 +54,8 @@ func run() error {
 
 	// initialize mongo
 	mdbOpts := options.Client().ApplyURI("mongodb://mongo:27017")
+	// used Built-in instrumentation modules for mongodb
+	mdbOpts.Monitor = apmmongo.CommandMonitor()
 	mdb, err = mongo.Connect(context.Background(), mdbOpts)
 	if err != nil {
 		return err
@@ -79,6 +86,8 @@ func run() error {
 
 	// Create Gin router
 	router := gin.Default()
+	router.Use(gin.Recovery())
+	router.Use(apmgin.Middleware(router))
 
 	// Define routes
 	router.GET("/", indexFunc)
@@ -121,16 +130,34 @@ func run() error {
 
 // Handlers
 
+// Built-in instrumentation modules
+// (https://www.elastic.co/docs/reference/apm/agents/go/builtin-modules#builtin-modules-apmmongo)
+
 func indexFunc(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// Start a custom span named "indexFunc"
+	span, ctx := apm.StartSpan(ctx, "indexFunc", "handler")
+	defer span.End()
+
 	c.String(http.StatusOK, "index called")
 }
 
 func paramFunc(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// Start custom span for this logic
+	span, ctx := apm.StartSpan(ctx, "paramFunc", "handler")
+	defer span.End()
+
 	param := c.Param("param")
 	c.String(http.StatusOK, "Got param: %s", param)
 }
 
 func exceptionFunc(c *gin.Context) {
+	ctx := c.Request.Context()
+	err := fmt.Errorf("Exception called")
+	apm.CaptureError(ctx, err).Send()
 	c.Status(http.StatusInternalServerError)
 }
 
@@ -151,6 +178,10 @@ func apiFunc(c *gin.Context) {
 }
 
 func redisFunc(c *gin.Context) {
+	ctx := c.Request.Context()
+	span, ctx := apm.StartSpan(ctx, "Redis GET", "db.redis.query")
+	defer span.End()
+
 	val, err := rdb.Get(c.Request.Context(), "key").Result()
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Redis error: %v", err)
@@ -166,6 +197,10 @@ func mongoFunc(c *gin.Context) {
 }
 
 func clickhouseFunc(c *gin.Context) {
+	ctx := c.Request.Context()
+	span, ctx := apm.StartSpan(ctx, "ClickHouse Query", "db.clickhouse.query")
+	defer span.End()
+
 	res, err := ccn.Query(c.Request.Context(), "SELECT NOW()")
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Clickhouse query error: %v", err)
@@ -175,6 +210,11 @@ func clickhouseFunc(c *gin.Context) {
 }
 
 func kafkaProduceFunc(c *gin.Context) {
+	ctx := c.Request.Context()
+	// Create a custom span for the Kafka produce operation
+	span, ctx := apm.StartSpan(ctx, "Kafka Produce", "messaging.kafka.produce")
+	defer span.End()
+
 	kcn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	_, err := kcn.WriteMessages(
 		kafka.Message{Value: []byte("one!")},
@@ -189,6 +229,11 @@ func kafkaProduceFunc(c *gin.Context) {
 }
 
 func kafkaConsumeFunc(c *gin.Context) {
+	ctx := c.Request.Context()
+	// Create a custom span for the Kafka consume operation
+	span, ctx := apm.StartSpan(ctx, "Kafka Consume Batch", "messaging.kafka.consume")
+	defer span.End()
+
 	kcn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	_ = kcn.ReadBatch(10e3, 1e6) // fetch 10KB min, 1MB max
 	c.String(http.StatusOK, "Kafka consumed")
