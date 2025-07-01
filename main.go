@@ -11,6 +11,9 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	gintrace "github.com/DataDog/dd-trace-go/contrib/gin-gonic/gin/v2"
+	ddhttp "github.com/DataDog/dd-trace-go/contrib/net/http/v2"
+	"github.com/DataDog/dd-trace-go/v2/ddtrace/tracer"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
@@ -31,6 +34,8 @@ var (
 )
 
 func main() {
+	tracer.Start()
+	defer tracer.Stop()
 	if err := run(); err != nil {
 		log.Fatalln(err)
 	}
@@ -40,7 +45,8 @@ func run() error {
 	var err error
 
 	// initialize http client
-	hcl = http.Client{}
+	// wrap your existing http client for external api calls (Datadog provides a wrapper for the {ddhttp.WrapClient()} http.Client that will automatically generate spans for all HTTP calls,)
+	hcl = *ddhttp.WrapClient(&http.Client{})
 
 	// initialize redis
 	rdb = redis.NewClient(&redis.Options{
@@ -79,6 +85,8 @@ func run() error {
 
 	// Create Gin router
 	router := gin.Default()
+
+	router.Use(gintrace.Middleware("my-service"))
 
 	// Define routes
 	router.GET("/", indexFunc)
@@ -121,12 +129,20 @@ func run() error {
 
 // Handlers
 
+// these external apis & databases like Mongo, Redis, Clickhouse, Kafka does not identify as a database in CubeAPM. Although ,we can create custom spans for these databases.
+// https://docs.datadoghq.com/tracing/trace_collection/custom_instrumentation/go/dd-api/
+// Library compatibility - https://docs.datadoghq.com/tracing/trace_collection/compatibility/go/?tab=v2
+
 func indexFunc(c *gin.Context) {
 	c.String(http.StatusOK, "index called")
 }
 
 func paramFunc(c *gin.Context) {
 	param := c.Param("param")
+	span, _ := tracer.StartSpanFromContext(c.Request.Context(), "manual.param.span")
+	span.SetTag("param", param)
+	span.Finish()
+
 	c.String(http.StatusOK, "Got param: %s", param)
 }
 
@@ -151,6 +167,12 @@ func apiFunc(c *gin.Context) {
 }
 
 func redisFunc(c *gin.Context) {
+	span, _ := tracer.StartSpanFromContext(c.Request.Context(), "redis.get",
+		tracer.ResourceName("GET key"),
+		tracer.SpanType("redis"),
+	)
+	span.SetTag("db.type", "redis")
+	defer span.Finish()
 	val, err := rdb.Get(c.Request.Context(), "key").Result()
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Redis error: %v", err)
@@ -160,6 +182,16 @@ func redisFunc(c *gin.Context) {
 }
 
 func mongoFunc(c *gin.Context) {
+	span, _ := tracer.StartSpanFromContext(c.Request.Context(), "mongo.query",
+		tracer.ResourceName("FindOne sampleCollection"),
+		tracer.SpanType("mongodb"),
+	)
+	span.SetTag("db.type", "mongodb")
+	span.SetTag("db.instance", "sample_db")
+	span.SetTag("db.statement", `{"name": "dummy"}`)
+	span.SetTag("db.collection", "sampleCollection")
+	defer span.Finish()
+
 	collection := mdb.Database("sample_db").Collection("sampleCollection")
 	_ = collection.FindOne(c.Request.Context(), bson.D{{Key: "name", Value: "dummy"}})
 	c.String(http.StatusOK, "Mongo called")
