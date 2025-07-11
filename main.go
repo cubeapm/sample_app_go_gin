@@ -22,6 +22,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"go.opentelemetry.io/contrib/instrumentation/go.mongodb.org/mongo-driver/mongo/otelmongo"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	semconv "go.opentelemetry.io/otel/semconv/v1.25.0"
 	apiTrace "go.opentelemetry.io/otel/trace"
@@ -48,7 +49,9 @@ func run() error {
 	var err error
 
 	// initialize http client
-	hcl = http.Client{}
+	hcl = http.Client{
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+	}
 
 	// initialize redis
 	rdb = redis.NewClient(&redis.Options{
