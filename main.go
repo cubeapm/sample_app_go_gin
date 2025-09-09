@@ -12,25 +12,30 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	gintrace "github.com/DataDog/dd-trace-go/contrib/gin-gonic/gin/v2"
+	mongotrace "github.com/DataDog/dd-trace-go/contrib/go.mongodb.org/mongo-driver.v2/v2/mongo"
 	ddhttp "github.com/DataDog/dd-trace-go/contrib/net/http/v2"
+	kafkatrace "github.com/DataDog/dd-trace-go/contrib/segmentio/kafka-go/v2"
 	"github.com/DataDog/dd-trace-go/v2/ddtrace/tracer"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
+	redistrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/redis/go-redis.v9"
 )
 
 const kafkaTopicName = "sample_topic"
 
 var (
 	hcl http.Client
-	rdb *redis.Client
+	rdb redis.UniversalClient
 	mdb *mongo.Client
 	ccn driver.Conn
 	kcn *kafka.Conn
+	kw  *kafkatrace.KafkaWriter
+	kr  *kafkatrace.Reader
 )
 
 func main() {
@@ -49,13 +54,16 @@ func run() error {
 	hcl = *ddhttp.WrapClient(&http.Client{})
 
 	// initialize redis
-	rdb = redis.NewClient(&redis.Options{
+	rdb = redistrace.NewClient(&redis.Options{
 		Addr: "redis:6379",
 	})
 
 	// initialize mongo
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	mdbOpts := options.Client().ApplyURI("mongodb://mongo:27017")
-	mdb, err = mongo.Connect(context.Background(), mdbOpts)
+	mdbOpts.Monitor = mongotrace.NewMonitor()
+	mdb, err = mongo.Connect(mdbOpts)
 	if err != nil {
 		return err
 	}
@@ -78,10 +86,26 @@ func run() error {
 	}
 
 	// initialize kafka
-	kcn, err = kafka.DialLeader(context.Background(), "tcp", "kafka:9092", kafkaTopicName, 0)
-	if err != nil {
-		return err
-	}
+	// Producer
+	kw = kafkatrace.NewWriter(kafka.WriterConfig{
+		Brokers: []string{"kafka:9092"},
+		Topic:   kafkaTopicName,
+	})
+
+	// Consumer
+	kr = kafkatrace.NewReader(kafka.ReaderConfig{
+		Brokers: []string{"kafka:9092"},
+		Topic:   kafkaTopicName,
+		GroupID: "my-group",
+	})
+	defer func() {
+		if kw != nil {
+			_ = kw.Close()
+		}
+		if kr != nil {
+			_ = kr.Close()
+		}
+	}()
 
 	// Create Gin router
 	router := gin.Default()
@@ -207,8 +231,10 @@ func clickhouseFunc(c *gin.Context) {
 }
 
 func kafkaProduceFunc(c *gin.Context) {
-	kcn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	_, err := kcn.WriteMessages(
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	err := kw.WriteMessages(ctx,
 		kafka.Message{Value: []byte("one!")},
 		kafka.Message{Value: []byte("two!")},
 		kafka.Message{Value: []byte("three!")},
@@ -221,7 +247,14 @@ func kafkaProduceFunc(c *gin.Context) {
 }
 
 func kafkaConsumeFunc(c *gin.Context) {
-	kcn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	_ = kcn.ReadBatch(10e3, 1e6) // fetch 10KB min, 1MB max
-	c.String(http.StatusOK, "Kafka consumed")
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	msg, err := kr.ReadMessage(ctx)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Kafka consume error: %v", err)
+		return
+	}
+
+	c.String(http.StatusOK, "Kafka consumed: %s", string(msg.Value))
 }
