@@ -145,13 +145,17 @@ func exceptionFunc(c *gin.Context) {
 }
 
 func apiFunc(c *gin.Context) {
+	txn := nrgin.Transaction(c)
 	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, "http://localhost:8000/", nil)
+	seg := newrelic.StartExternalSegment(txn, req)
 	resp, err := hcl.Do(req)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "API call error: %v", err)
 		return
 	}
 	defer resp.Body.Close()
+	seg.End()
+
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Read error: %v", err)
@@ -161,7 +165,16 @@ func apiFunc(c *gin.Context) {
 }
 
 func redisFunc(c *gin.Context) {
+	txn := nrgin.Transaction(c)
+	seg := newrelic.DatastoreSegment{
+		StartTime:  txn.StartSegmentNow(),
+		Product:    newrelic.DatastoreRedis,
+		Collection: "cache",
+		Operation:  "GET",
+	}
 	val, err := rdb.Get(c.Request.Context(), "key").Result()
+	seg.End()
+
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Redis error: %v", err)
 		return
@@ -170,13 +183,32 @@ func redisFunc(c *gin.Context) {
 }
 
 func mongoFunc(c *gin.Context) {
+	txn := nrgin.Transaction(c)
+
+	seg := newrelic.DatastoreSegment{
+		StartTime:  txn.StartSegmentNow(),
+		Product:    newrelic.DatastoreMongoDB,
+		Collection: "sampleCollection",
+		Operation:  "FindOne",
+	}
 	collection := mdb.Database("sample_db").Collection("sampleCollection")
 	_ = collection.FindOne(c.Request.Context(), bson.D{{Key: "name", Value: "dummy"}})
+	seg.End()
 	c.String(http.StatusOK, "Mongo called")
 }
 
 func clickhouseFunc(c *gin.Context) {
+	txn := nrgin.Transaction(c)
+
+	seg := newrelic.DatastoreSegment{
+		StartTime:  txn.StartSegmentNow(),
+		Product:    "ClickHouse", // custom
+		Collection: "system",
+		Operation:  "Query",
+	}
 	res, err := ccn.Query(c.Request.Context(), "SELECT NOW()")
+	seg.End()
+
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Clickhouse query error: %v", err)
 		return
@@ -185,12 +217,22 @@ func clickhouseFunc(c *gin.Context) {
 }
 
 func kafkaProduceFunc(c *gin.Context) {
+	txn := nrgin.Transaction(c)
+
+	seg := newrelic.DatastoreSegment{
+		StartTime:  txn.StartSegmentNow(),
+		Product:    "Kafka",
+		Collection: kafkaTopicName,
+		Operation:  "Produce",
+	}
 	kcn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	_, err := kcn.WriteMessages(
 		kafka.Message{Value: []byte("one!")},
 		kafka.Message{Value: []byte("two!")},
 		kafka.Message{Value: []byte("three!")},
 	)
+	seg.End()
+
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Kafka produce error: %v", err)
 		return
@@ -199,7 +241,17 @@ func kafkaProduceFunc(c *gin.Context) {
 }
 
 func kafkaConsumeFunc(c *gin.Context) {
+	txn := nrgin.Transaction(c)
+
+	seg := newrelic.DatastoreSegment{
+		StartTime:  txn.StartSegmentNow(),
+		Product:    "Kafka",
+		Collection: kafkaTopicName,
+		Operation:  "Consume",
+	}
 	kcn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	_ = kcn.ReadBatch(10e3, 1e6) // fetch 10KB min, 1MB max
+	seg.End()
+
 	c.String(http.StatusOK, "Kafka consumed")
 }
