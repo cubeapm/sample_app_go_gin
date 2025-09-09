@@ -5,7 +5,7 @@ services:
       context: .
     container_name: cube_go_gin_http
     environment:
-      - ELASTIC_APM_SERVICE_NAME=cube_sample_go_gin_http_elastic
+      - ELASTIC_APM_SERVICE_NAME=cube_sample_go_net_http_gin_elastic
       - ELASTIC_APM_SERVER_URL=http://host.docker.internal:3130
 
       # optional settings
