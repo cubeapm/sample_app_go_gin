@@ -206,11 +206,23 @@ func mongoFunc(c *gin.Context) {
 }
 
 func clickhouseFunc(c *gin.Context) {
-	res, err := ccn.Query(c.Request.Context(), "SELECT NOW()")
+	span, ctx := tracer.StartSpanFromContext(
+		c.Request.Context(),
+		"clickhouse.query",
+		tracer.ResourceName("SELECT NOW()"),
+		tracer.Tag("component", "clickhouse"),
+		tracer.Tag("db.system", "clickhouse"),
+	)
+	defer span.Finish()
+	res, err := ccn.Query(ctx, "SELECT NOW()")
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Clickhouse query error: %v", err)
 		return
 	}
+	span.SetTag("span.kind", "client")
+	span.SetTag("db.statement", "SELECT NOW()")
+	span.SetTag("db.rows", len(res.Columns()))
+
 	c.String(http.StatusOK, "Clickhouse called: %v", res.Columns())
 }
 
