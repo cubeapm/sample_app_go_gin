@@ -191,12 +191,6 @@ func apiFunc(c *gin.Context) {
 }
 
 func redisFunc(c *gin.Context) {
-	span, _ := tracer.StartSpanFromContext(c.Request.Context(), "redis.get",
-		tracer.ResourceName("GET key"),
-		tracer.SpanType("redis"),
-	)
-	span.SetTag("db.type", "redis")
-	defer span.Finish()
 	val, err := rdb.Get(c.Request.Context(), "key").Result()
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Redis error: %v", err)
@@ -206,16 +200,6 @@ func redisFunc(c *gin.Context) {
 }
 
 func mongoFunc(c *gin.Context) {
-	span, _ := tracer.StartSpanFromContext(c.Request.Context(), "mongo.query",
-		tracer.ResourceName("FindOne sampleCollection"),
-		tracer.SpanType("mongodb"),
-	)
-	span.SetTag("db.type", "mongodb")
-	span.SetTag("db.instance", "sample_db")
-	span.SetTag("db.statement", `{"name": "dummy"}`)
-	span.SetTag("db.collection", "sampleCollection")
-	defer span.Finish()
-
 	collection := mdb.Database("sample_db").Collection("sampleCollection")
 	_ = collection.FindOne(c.Request.Context(), bson.D{{Key: "name", Value: "dummy"}})
 	c.String(http.StatusOK, "Mongo called")
