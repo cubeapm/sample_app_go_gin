@@ -183,7 +183,10 @@ func redisFunc(c *gin.Context) {
 	defer span.End()
 
 	val, err := rdb.Get(c.Request.Context(), "key").Result()
-	if err != nil {
+	if err == redis.Nil {
+		c.String(http.StatusOK, "Redis called")
+		return
+	} else if err != nil {
 		c.String(http.StatusInternalServerError, "Redis error: %v", err)
 		return
 	}
