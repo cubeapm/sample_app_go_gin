@@ -11,7 +11,7 @@ services:
 
       # optional settings
       # - DD_ENV=myenv
-      # - DD_VERSION=1.2.3
+      # - DD_VERSION=1.2.3 # TODO: this is not working
       # - DD_TAGS=mykey1:myvalue1,mykey2:myvalue2
 
       # Print Datadog tracer startup logs on screen
