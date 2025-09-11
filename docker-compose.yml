@@ -3,7 +3,7 @@ services:
   go_net_http:
     build:
       context: .
-    container_name: cube_go_gin_http
+    container_name: cube_go_gin
     ports:
       - "8000:8000"
     depends_on:
@@ -15,16 +15,16 @@ services:
 
   redis:
     image: redis:alpine3.18
-    container_name: cube_go_gin_http_redis
+    container_name: cube_go_gin_redis
 
   mongo:
     image: mongo:7.0.12
-    container_name: cube_go_gin_http_mongo
+    container_name: cube_go_gin_mongo
 
   clickhouse:
     image: "clickhouse/clickhouse-server:24.8.11.5-alpine"
     user: "101:101"
-    container_name: cube_go_gin_http_clickhouse
+    container_name: cube_go_gin_clickhouse
     volumes:
       - ./clickhouse/config.xml:/etc/clickhouse-server/config.d/config.xml
       - ./clickhouse/users.xml:/etc/clickhouse-server/users.d/users.xml
@@ -37,7 +37,7 @@ services:
   clickhouse-keeper:
     image: "clickhouse/clickhouse-keeper:24.8.11.5-alpine"
     user: "101:101"
-    container_name: cube_go_gin_http_clickhouse_keeper
+    container_name: cube_go_gin_clickhouse_keeper
     volumes:
       - ./clickhouse/keeper_config.xml:/etc/clickhouse-keeper/keeper_config.xml
     ports:
@@ -45,7 +45,7 @@ services:
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
-    container_name: cube_go_gin_http_kafka
+    container_name: cube_go_gin_kafka
     ports:
       - "9092:9092"
     environment:
@@ -69,7 +69,7 @@ services:
 
   kafdrop:
     image: obsidiandynamics/kafdrop:4.0.0
-    container_name: cube_go_gin_http_kafdrop
+    container_name: cube_go_gin_kafdrop
     depends_on:
       - kafka
     ports:
