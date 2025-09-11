@@ -8,19 +8,19 @@ Refer the project README below for more details.
 
 ---
 
-# Go Gin net/http Instrumentation
+# Go Gin Instrumentation
 
-This is a sample app to demonstrate how to instrument Go Gin app using net/http with **Datadog**, **Elastic**, **New Relic** and **OpenTelemetry**. It contains source code for the Go Gin app which interacts with various services like Redis, MySQL, MongoDB, Kafka, ClickHouse, etc. to demonstrate tracing for these services. This repository has a docker compose file to set up all these services conveniently.
+This is a sample app to demonstrate how to instrument Go Gin app using with **Datadog**, **Elastic**, **New Relic** and **OpenTelemetry**. It contains source code for the Go Gin app which interacts with various services like Redis, MySQL, MongoDB, Kafka, ClickHouse, etc. to demonstrate tracing for these services. This repository has a docker compose file to set up all these services conveniently.
 
-The code is organized into multiple branches. The main branch has the Go Gin net/http app without any instrumentation. Other branches then build upon the main branch to add specific instrumentations as below:
+The code is organized into multiple branches. The main branch has the Go Gin app without any instrumentation. Other branches then build upon the main branch to add specific instrumentations as below:
 
 | Branch                                                                                         | Instrumentation | Code changes for instrumentation                                                                                |
 | ---------------------------------------------------------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------------------- |
-| [main](https://github.com/cubeapm/sample_app_go_gin_http/tree/main)         | None            | -                                                                                                               |
-| [datadog](https://github.com/cubeapm/sample_app_go_gin_http/tree/datadog) | Datadog       | [main...datadog](https://github.com/cubeapm/sample_app_go_gin_http/compare/main...datadog) |
-| [elastic](https://github.com/cubeapm/sample_app_go_gin_http/tree/elastic)         | Elastic   | [main...elastic](https://github.com/cubeapm/sample_app_go_gin_http/compare/main...elastic)         |
-| [newrelic](https://github.com/cubeapm/sample_app_go_gin_http/tree/newrelic) | New Relic       | [main...newrelic](https://github.com/cubeapm/sample_app_go_gin_http/compare/main...newrelic) |
-| [otel](https://github.com/cubeapm/sample_app_go_gin_http/tree/otel)         | OpenTelemetry   | [main...otel](https://github.com/cubeapm/sample_app_go_gin_http/compare/main...otel)         |
+| [main](https://github.com/cubeapm/sample_app_go_gin/tree/main)         | None            | -                                                                                                               |
+| [datadog](https://github.com/cubeapm/sample_app_go_gin/tree/datadog) | Datadog       | [main...datadog](https://github.com/cubeapm/sample_app_go_gin/compare/main...datadog) |
+| [elastic](https://github.com/cubeapm/sample_app_go_gin/tree/elastic)         | Elastic   | [main...elastic](https://github.com/cubeapm/sample_app_go_gin/compare/main...elastic)         |
+| [newrelic](https://github.com/cubeapm/sample_app_go_gin/tree/newrelic) | New Relic       | [main...newrelic](https://github.com/cubeapm/sample_app_go_gin/compare/main...newrelic) |
+| [otel](https://github.com/cubeapm/sample_app_go_gin/tree/otel)         | OpenTelemetry   | [main...otel](https://github.com/cubeapm/sample_app_go_gin/compare/main...otel)         |
 
 ## Setup
 
