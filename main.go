@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"io"
 	"log"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	kafkatrace "github.com/DataDog/dd-trace-go/contrib/segmentio/kafka-go/v2"
 	"github.com/DataDog/dd-trace-go/v2/ddtrace/tracer"
 	"github.com/gin-gonic/gin"
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -29,13 +31,14 @@ import (
 const kafkaTopicName = "sample_topic"
 
 var (
-	hcl http.Client
-	rdb redis.UniversalClient
-	mdb *mongo.Client
-	ccn driver.Conn
-	kcn *kafka.Conn
-	kw  *kafkatrace.KafkaWriter
-	kr  *kafkatrace.Reader
+	hcl     http.Client
+	mysqldb *sql.DB
+	rdb     redis.UniversalClient
+	mdb     *mongo.Client
+	ccn     driver.Conn
+	kcn     *kafka.Conn
+	kw      *kafkatrace.KafkaWriter
+	kr      *kafkatrace.Reader
 )
 
 func main() {
@@ -52,6 +55,18 @@ func run() error {
 	// initialize http client
 	// wrap your existing http client for external api calls (Datadog provides a wrapper for the {ddhttp.WrapClient()} http.Client that will automatically generate spans for all HTTP calls,)
 	hcl = *ddhttp.WrapClient(&http.Client{})
+
+	// initialize mysql
+	mysqldb, err = sql.Open("mysql", "root:root@tcp(mysql:3306)/test")
+	if err != nil {
+		return err
+	}
+	if err = mysqldb.Ping(); err != nil {
+		return err
+	}
+	defer func() {
+		_ = mysqldb.Close()
+	}()
 
 	// initialize redis
 	rdb = redistrace.NewClient(&redis.Options{
@@ -117,6 +132,7 @@ func run() error {
 	router.GET("/param/:param", paramFunc)
 	router.GET("/exception", exceptionFunc)
 	router.GET("/api", apiFunc)
+	router.GET("/mysql", mysqlFunc)
 	router.GET("/redis", redisFunc)
 	router.GET("/mongo", mongoFunc)
 	router.GET("/clickhouse", clickhouseFunc)
@@ -188,6 +204,16 @@ func apiFunc(c *gin.Context) {
 		return
 	}
 	c.String(http.StatusOK, "Got api: %s", respBody)
+}
+
+func mysqlFunc(c *gin.Context) {
+	var now string
+	err := mysqldb.QueryRow("SELECT NOW()").Scan(&now)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "MySQL query error: %v", err)
+		return
+	}
+	c.String(http.StatusOK, "MySQL called: %s", now)
 }
 
 func redisFunc(c *gin.Context) {
