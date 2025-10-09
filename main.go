@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"log"
@@ -13,6 +14,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/gin-gonic/gin"
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
@@ -31,12 +33,13 @@ import (
 const kafkaTopicName = "sample_topic"
 
 var (
-	tracer apiTrace.Tracer
-	hcl    http.Client
-	rdb    *redis.Client
-	mdb    *mongo.Client
-	ccn    driver.Conn
-	kcn    *kafka.Conn
+	tracer  apiTrace.Tracer
+	hcl     http.Client
+	mysqldb *sql.DB
+	rdb     *redis.Client
+	mdb     *mongo.Client
+	ccn     driver.Conn
+	kcn     *kafka.Conn
 )
 
 func main() {
@@ -52,6 +55,18 @@ func run() error {
 	hcl = http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 	}
+
+	// initialize mysql
+	mysqldb, err = sql.Open("mysql", "root:root@tcp(mysql:3306)/test")
+	if err != nil {
+		return err
+	}
+	if err = mysqldb.Ping(); err != nil {
+		return err
+	}
+	defer func() {
+		_ = mysqldb.Close()
+	}()
 
 	// initialize redis
 	rdb = redis.NewClient(&redis.Options{
@@ -122,6 +137,7 @@ func run() error {
 	router.GET("/param/:param", paramFunc)
 	router.GET("/exception", exceptionFunc)
 	router.GET("/api", apiFunc)
+	router.GET("/mysql", mysqlFunc)
 	router.GET("/redis", redisFunc)
 	router.GET("/mongo", mongoFunc)
 	router.GET("/clickhouse", clickhouseFunc)
@@ -181,6 +197,16 @@ func apiFunc(c *gin.Context) {
 		return
 	}
 	c.String(http.StatusOK, "Got api: %s", respBody)
+}
+
+func mysqlFunc(c *gin.Context) {
+	var now string
+	err := mysqldb.QueryRow("SELECT NOW()").Scan(&now)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "MySQL query error: %v", err)
+		return
+	}
+	c.String(http.StatusOK, "MySQL called: %s", now)
 }
 
 func redisFunc(c *gin.Context) {
