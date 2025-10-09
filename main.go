@@ -26,6 +26,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/go.mongodb.org/mongo-driver/mongo/otelmongo"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	semconv "go.opentelemetry.io/otel/semconv/v1.25.0"
 	apiTrace "go.opentelemetry.io/otel/trace"
 )
@@ -200,12 +201,26 @@ func apiFunc(c *gin.Context) {
 }
 
 func mysqlFunc(c *gin.Context) {
+	ctx := c.Request.Context()
+	// Start a custom span for MySQL query
+	ctx, span := tracer.Start(ctx, "mysql.query", apiTrace.WithSpanKind(apiTrace.SpanKindClient))
+	defer span.End()
+	span.SetAttributes(
+		semconv.DBSystemMySQL,
+		semconv.DBOperation("SELECT"),
+		semconv.DBStatement("SELECT NOW()"),
+		semconv.ServerAddress("mysql"),
+		semconv.ServerPort(3306),
+	)
 	var now string
-	err := mysqldb.QueryRow("SELECT NOW()").Scan(&now)
+	err := mysqldb.QueryRowContext(ctx, "SELECT NOW()").Scan(&now)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		c.String(http.StatusInternalServerError, "MySQL query error: %v", err)
 		return
 	}
+	span.SetStatus(codes.Ok, "Query successful")
 	c.String(http.StatusOK, "MySQL called: %s", now)
 }
 
