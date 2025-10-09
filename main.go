@@ -194,6 +194,9 @@ func apiFunc(c *gin.Context) {
 }
 
 func mysqlFunc(c *gin.Context) {
+	ctx := c.Request.Context()
+	span, ctx := apm.StartSpan(ctx, "SELECT users", "db.mysql.query")
+	defer span.End()
 	var now string
 	err := mysqldb.QueryRow("SELECT NOW()").Scan(&now)
 	if err != nil {
