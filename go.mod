@@ -102,6 +102,7 @@ require (
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.36.0
+	github.com/DataDog/dd-trace-go/contrib/database/sql/v2 v2.2.3
 	github.com/DataDog/dd-trace-go/contrib/gin-gonic/gin/v2 v2.2.3
 	github.com/DataDog/dd-trace-go/contrib/go.mongodb.org/mongo-driver.v2/v2 v2.2.3
 	github.com/DataDog/dd-trace-go/contrib/net/http/v2 v2.2.3

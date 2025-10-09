@@ -60,6 +60,8 @@ github.com/DataDog/datadog-agent/pkg/version v0.67.0 h1:TB8H8r+laB1Qdttvvc6XJVyL
 github.com/DataDog/datadog-agent/pkg/version v0.67.0/go.mod h1:kvAw/WbI7qLAsDI2wHabZfM7Cv2zraD3JA3323GEB+8=
 github.com/DataDog/datadog-go/v5 v5.6.0 h1:2oCLxjF/4htd55piM75baflj/KoE6VYS7alEUqFvRDw=
 github.com/DataDog/datadog-go/v5 v5.6.0/go.mod h1:K9kcYBlxkcPP8tvvjZZKs/m1edNAUFzBbdpTUKfCsuw=
+github.com/DataDog/dd-trace-go/contrib/database/sql/v2 v2.2.3 h1:9l8QeMzlmnMRVU2UomQSQqo7Gd2el57s58duB2BVJbk=
+github.com/DataDog/dd-trace-go/contrib/database/sql/v2 v2.2.3/go.mod h1:zy9XZaf8OAodoHyBw2ltn1wNgMqukBQVkqB47Y3OM1o=
 github.com/DataDog/dd-trace-go/contrib/gin-gonic/gin/v2 v2.0.1 h1:7L4icgsFX2zUbCF28I5VL4bixG+ocjHMziQ8bl3pebg=
 github.com/DataDog/dd-trace-go/contrib/gin-gonic/gin/v2 v2.0.1/go.mod h1:LE5BC4hipmkWA4FS231cpfsBd8rH7SNPrGTzW5W+KZA=
 github.com/DataDog/dd-trace-go/contrib/gin-gonic/gin/v2 v2.2.3 h1:WMyQTWplkbw2E8erspxXcPvKyzO4BmC5o478yHjK3Xg=
@@ -172,12 +174,12 @@ github.com/go-playground/validator/v10 v10.26.0 h1:SP05Nqhjcvz81uJaRfEV0YBSSSGMc
 github.com/go-playground/validator/v10 v10.26.0/go.mod h1:I5QpIEbmr8On7W0TktmJAumgzX4CA1XNl4ZmDuVHKKo=
 github.com/go-redis/redis v6.15.9+incompatible h1:K0pv1D7EQUjfyoMql+r/jZqCLizCGKFlFgcHWWmHQjg=
 github.com/go-redis/redis v6.15.9+incompatible/go.mod h1:NAIEuMOZ/fxfXJIrKDQDz8wamY7mA7PouImQ2Jvg6kA=
+github.com/go-sql-driver/mysql v1.9.3 h1:U/N249h2WzJ3Ukj8SowVFjdtZKfu9vlLZxjPXV1aweo=
+github.com/go-sql-driver/mysql v1.9.3/go.mod h1:qn46aNg1333BRMNU69Lq93t8du/dwxI64Gl8i5p1WMU=
 github.com/go-viper/mapstructure/v2 v2.2.1 h1:ZAaOCxANMuZx5RCeg0mBdEZk7DZasvvZIxtHqx8aGss=
 github.com/go-viper/mapstructure/v2 v2.2.1/go.mod h1:oJDH3BJKyqBA2TXFhDsKDGDTlndYOZ6rGS0BRZIxGhM=
 github.com/go-viper/mapstructure/v2 v2.3.0 h1:27XbWsHIqhbdR5TIC911OfYvgSaW93HM+dX7970Q7jk=
 github.com/go-viper/mapstructure/v2 v2.3.0/go.mod h1:oJDH3BJKyqBA2TXFhDsKDGDTlndYOZ6rGS0BRZIxGhM=
-github.com/go-sql-driver/mysql v1.9.3 h1:U/N249h2WzJ3Ukj8SowVFjdtZKfu9vlLZxjPXV1aweo=
-github.com/go-sql-driver/mysql v1.9.3/go.mod h1:qn46aNg1333BRMNU69Lq93t8du/dwxI64Gl8i5p1WMU=
 github.com/goccy/go-json v0.10.5 h1:Fq85nIqj+gXn/S5ahsiTlK3TmC85qgirsdTP/+DeaC4=
 github.com/goccy/go-json v0.10.5/go.mod h1:oq7eo15ShAhp70Anwd5lgX2pLfOS3QCiwU/PULtXL6M=
 github.com/gogo/protobuf v1.3.2 h1:Ov1cvc58UF3b5XjBnZv7+opcTcQFZebYjWzi34vdm4Q=

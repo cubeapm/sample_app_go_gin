@@ -12,10 +12,12 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	sqltrace "github.com/DataDog/dd-trace-go/contrib/database/sql/v2"
 	gintrace "github.com/DataDog/dd-trace-go/contrib/gin-gonic/gin/v2"
 	mongotrace "github.com/DataDog/dd-trace-go/contrib/go.mongodb.org/mongo-driver.v2/v2/mongo"
 	ddhttp "github.com/DataDog/dd-trace-go/contrib/net/http/v2"
 	kafkatrace "github.com/DataDog/dd-trace-go/contrib/segmentio/kafka-go/v2"
+	"github.com/DataDog/dd-trace-go/v2/ddtrace/ext"
 	"github.com/DataDog/dd-trace-go/v2/ddtrace/tracer"
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
@@ -57,7 +59,7 @@ func run() error {
 	hcl = *ddhttp.WrapClient(&http.Client{})
 
 	// initialize mysql
-	mysqldb, err = sql.Open("mysql", "root:root@tcp(mysql:3306)/test")
+	mysqldb, err = sqltrace.Open("mysql", "root:root@tcp(mysql:3306)/test")
 	if err != nil {
 		return err
 	}
@@ -207,9 +209,18 @@ func apiFunc(c *gin.Context) {
 }
 
 func mysqlFunc(c *gin.Context) {
+	// Start a custom parent span for extra context
+	span, ctx := tracer.StartSpanFromContext(c.Request.Context(), "mysql.query",
+		tracer.SpanType(ext.SpanTypeSQL),
+		tracer.ServiceName("mysql"),
+		tracer.ResourceName("SELECT NOW()"),
+	)
+	defer span.Finish()
+
 	var now string
-	err := mysqldb.QueryRow("SELECT NOW()").Scan(&now)
+	err := mysqldb.QueryRowContext(ctx, "SELECT NOW()").Scan(&now)
 	if err != nil {
+		span.SetTag(ext.Error, err)
 		c.String(http.StatusInternalServerError, "MySQL query error: %v", err)
 		return
 	}
