@@ -27,12 +27,12 @@ services:
 
   mysql:
     image: mysql:8.0
-    container_name: cube_ruby_go_gin_mysql
+    container_name: cube_go_gin_mysql
     environment:
       - MYSQL_ROOT_PASSWORD=root
       - MYSQL_DATABASE=test
     volumes:
-      - cube_ruby_go_gin_mysql:/var/lib/mysql
+      - cube_go_gin_mysql:/var/lib/mysql
     ports:
       - "3306:3306"
 
@@ -101,4 +101,4 @@ services:
       KAFKA_BROKERCONNECT: kafka:29092
 
 volumes:
-  cube_ruby_go_gin_mysql:
+  cube_go_gin_mysql:
