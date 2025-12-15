@@ -43,6 +43,26 @@ func main() {
 	}
 }
 
+func logWithTrace(c *gin.Context, msg string) {
+	txn := nrgin.Transaction(c)
+
+	traceID := "0"
+	spanID := "0"
+
+	if txn != nil {
+		md := txn.GetLinkingMetadata()
+		traceID = md.TraceID
+		spanID = md.SpanID
+	}
+
+	logger.Printf(
+		"trace_id=%s span_id=%s %s",
+		traceID,
+		spanID,
+		msg,
+	)
+}
+
 func run() error {
 	var err error
 
@@ -155,23 +175,24 @@ func run() error {
 // todo: All api's call is visible on APM, and the rest of the data and traces — like Redis, MongoDB, external API calls, ClickHouse, and Kafka — is not visible."
 
 func indexFunc(c *gin.Context) {
+	logWithTrace(c, "index called")
 	logger.Println("index called")
 	c.String(http.StatusOK, "index called")
 }
 
 func paramFunc(c *gin.Context) {
-	logger.Println("param called")
+	logWithTrace(c, "param called")
 	param := c.Param("param")
 	c.String(http.StatusOK, "Got param: %s", param)
 }
 
 func exceptionFunc(c *gin.Context) {
-	logger.Println("exception called")
+	logWithTrace(c, "exception called")
 	c.Status(http.StatusInternalServerError)
 }
 
 func apiFunc(c *gin.Context) {
-	logger.Println("api called")
+	logWithTrace(c, "api called")
 	txn := nrgin.Transaction(c)
 	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, "http://localhost:8000/", nil)
 	seg := newrelic.StartExternalSegment(txn, req)
@@ -188,12 +209,12 @@ func apiFunc(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "Read error: %v", err)
 		return
 	}
-	logger.Println("api success")
+	logWithTrace(c, "api success")
 	c.String(http.StatusOK, "Got api: %s", respBody)
 }
 
 func mysqlFunc(c *gin.Context) {
-	logger.Println("mysql called")
+	logWithTrace(c, "mysql called")
 	txn := nrgin.Transaction(c)
 	seg := newrelic.DatastoreSegment{
 		StartTime:  txn.StartSegmentNow(),
@@ -208,12 +229,12 @@ func mysqlFunc(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "MySQL query error: %v", err)
 		return
 	}
-	logger.Println("mysql success:", now)
+	logWithTrace(c, "mysql success")
 	c.String(http.StatusOK, "MySQL called: %s", now)
 }
 
 func redisFunc(c *gin.Context) {
-	logger.Println("redis called")
+	logWithTrace(c, "redis called")
 	txn := nrgin.Transaction(c)
 	seg := newrelic.DatastoreSegment{
 		StartTime:  txn.StartSegmentNow(),
@@ -231,12 +252,12 @@ func redisFunc(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "Redis error: %v", err)
 		return
 	}
-	logger.Println("redis success:", val)
+	logWithTrace(c, "redis success")
 	c.String(http.StatusOK, "Redis called: %s", val)
 }
 
 func mongoFunc(c *gin.Context) {
-	logger.Println("mongo called")
+	logWithTrace(c, "mongo called")
 	txn := nrgin.Transaction(c)
 
 	seg := newrelic.DatastoreSegment{
@@ -248,12 +269,12 @@ func mongoFunc(c *gin.Context) {
 	collection := mdb.Database("sample_db").Collection("sampleCollection")
 	_ = collection.FindOne(c.Request.Context(), bson.D{{Key: "name", Value: "dummy"}})
 	seg.End()
-	logger.Println("mongo finished")
+	logWithTrace(c, "mongo finished")
 	c.String(http.StatusOK, "Mongo called")
 }
 
 func clickhouseFunc(c *gin.Context) {
-	logger.Println("clickhouse called")
+	logWithTrace(c, "clickhouse called")
 	txn := nrgin.Transaction(c)
 
 	seg := newrelic.DatastoreSegment{
@@ -269,12 +290,12 @@ func clickhouseFunc(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "Clickhouse query error: %v", err)
 		return
 	}
-	logger.Println("clickhouse success, cols:", res.Columns())
+	logWithTrace(c, "clickhouse success")
 	c.String(http.StatusOK, "Clickhouse called: %v", res.Columns())
 }
 
 func kafkaProduceFunc(c *gin.Context) {
-	logger.Println("kafka produce called")
+	logWithTrace(c, "Kafka produce called")
 	txn := nrgin.Transaction(c)
 
 	seg := newrelic.DatastoreSegment{
@@ -296,12 +317,12 @@ func kafkaProduceFunc(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "Kafka produce error: %v", err)
 		return
 	}
-	logger.Println("kafka produced")
+	logWithTrace(c, "kafka produce success")
 	c.String(http.StatusOK, "Kafka produced")
 }
 
 func kafkaConsumeFunc(c *gin.Context) {
-	logger.Println("kafka consume called")
+	logWithTrace(c, "kafka consume called")
 	txn := nrgin.Transaction(c)
 
 	seg := newrelic.DatastoreSegment{
