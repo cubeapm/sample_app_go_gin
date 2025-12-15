@@ -14,6 +14,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/newrelic/go-agent/v3/integrations/logcontext-v2/logWriter"
 	"github.com/newrelic/go-agent/v3/integrations/nrgin"
 	"github.com/newrelic/go-agent/v3/newrelic"
 	"github.com/redis/go-redis/v9"
@@ -33,6 +34,7 @@ var (
 	mdb     *mongo.Client
 	ccn     driver.Conn
 	kcn     *kafka.Conn
+	logger  *log.Logger
 )
 
 func main() {
@@ -99,6 +101,11 @@ func run() error {
 		newrelic.ConfigFromEnvironment(),
 	)
 
+	logger = log.New(
+		logWriter.New(os.Stdout, app),
+		"",
+		log.LstdFlags,
+	)
 	// Create Gin router
 	router := gin.Default()
 	router.Use(nrgin.Middleware(app))
@@ -148,19 +155,23 @@ func run() error {
 // todo: All api's call is visible on APM, and the rest of the data and traces — like Redis, MongoDB, external API calls, ClickHouse, and Kafka — is not visible."
 
 func indexFunc(c *gin.Context) {
+	logger.Println("index called")
 	c.String(http.StatusOK, "index called")
 }
 
 func paramFunc(c *gin.Context) {
+	logger.Println("param called")
 	param := c.Param("param")
 	c.String(http.StatusOK, "Got param: %s", param)
 }
 
 func exceptionFunc(c *gin.Context) {
+	logger.Println("exception called")
 	c.Status(http.StatusInternalServerError)
 }
 
 func apiFunc(c *gin.Context) {
+	logger.Println("api called")
 	txn := nrgin.Transaction(c)
 	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, "http://localhost:8000/", nil)
 	seg := newrelic.StartExternalSegment(txn, req)
@@ -177,10 +188,12 @@ func apiFunc(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "Read error: %v", err)
 		return
 	}
+	logger.Println("api success")
 	c.String(http.StatusOK, "Got api: %s", respBody)
 }
 
 func mysqlFunc(c *gin.Context) {
+	logger.Println("mysql called")
 	txn := nrgin.Transaction(c)
 	seg := newrelic.DatastoreSegment{
 		StartTime:  txn.StartSegmentNow(),
@@ -195,10 +208,12 @@ func mysqlFunc(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "MySQL query error: %v", err)
 		return
 	}
+	logger.Println("mysql success:", now)
 	c.String(http.StatusOK, "MySQL called: %s", now)
 }
 
 func redisFunc(c *gin.Context) {
+	logger.Println("redis called")
 	txn := nrgin.Transaction(c)
 	seg := newrelic.DatastoreSegment{
 		StartTime:  txn.StartSegmentNow(),
@@ -216,10 +231,12 @@ func redisFunc(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "Redis error: %v", err)
 		return
 	}
+	logger.Println("redis success:", val)
 	c.String(http.StatusOK, "Redis called: %s", val)
 }
 
 func mongoFunc(c *gin.Context) {
+	logger.Println("mongo called")
 	txn := nrgin.Transaction(c)
 
 	seg := newrelic.DatastoreSegment{
@@ -231,10 +248,12 @@ func mongoFunc(c *gin.Context) {
 	collection := mdb.Database("sample_db").Collection("sampleCollection")
 	_ = collection.FindOne(c.Request.Context(), bson.D{{Key: "name", Value: "dummy"}})
 	seg.End()
+	logger.Println("mongo finished")
 	c.String(http.StatusOK, "Mongo called")
 }
 
 func clickhouseFunc(c *gin.Context) {
+	logger.Println("clickhouse called")
 	txn := nrgin.Transaction(c)
 
 	seg := newrelic.DatastoreSegment{
@@ -250,10 +269,12 @@ func clickhouseFunc(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "Clickhouse query error: %v", err)
 		return
 	}
+	logger.Println("clickhouse success, cols:", res.Columns())
 	c.String(http.StatusOK, "Clickhouse called: %v", res.Columns())
 }
 
 func kafkaProduceFunc(c *gin.Context) {
+	logger.Println("kafka produce called")
 	txn := nrgin.Transaction(c)
 
 	seg := newrelic.DatastoreSegment{
@@ -271,13 +292,16 @@ func kafkaProduceFunc(c *gin.Context) {
 	seg.End()
 
 	if err != nil {
+		logger.Println("Kafka produce error:", err)
 		c.String(http.StatusInternalServerError, "Kafka produce error: %v", err)
 		return
 	}
+	logger.Println("kafka produced")
 	c.String(http.StatusOK, "Kafka produced")
 }
 
 func kafkaConsumeFunc(c *gin.Context) {
+	logger.Println("kafka consume called")
 	txn := nrgin.Transaction(c)
 
 	seg := newrelic.DatastoreSegment{
