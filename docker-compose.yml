@@ -8,11 +8,14 @@ services:
       - DD_SERVICE=cube_sample_go_gin_datadog
 
       # Send data to Datadog Agent
-      - DD_AGENT_HOST=datadog-agent
+      # - DD_AGENT_HOST=datadog-agent
 
       # Enable Runtime metrics
       - DD_RUNTIME_METRICS_ENABLED=true
       - DD_RUNTIME_METRICS_RUNTIME_ID_ENABLED=true
+
+      #Send traces using dd-tracer to cubeapm widout dd-agent.
+      # - DD_TRACE_AGENT_URL=http://host.docker.internal:3130
 
       # optional settings
       # - DD_ENV=myenv
@@ -63,7 +66,7 @@ services:
     volumes:
       - cube_go_gin_mysql:/var/lib/mysql
     ports:
-      - "3306:3306"
+      - "33066:3306"
 
   redis:
     image: redis:alpine3.18
